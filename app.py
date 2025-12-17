@@ -3,25 +3,25 @@
 ==============================================
 
 A Streamlit app for real-time speech-to-trade on Kalshi "What will X say?" markets.
-
-Features:
-- Live audio transcription via Deepgram
-- Trigger word detection with negation handling
-- Real-time market prices from Kalshi
-- Trade execution interface
+Uses Deepgram for live audio transcription via WebRTC.
 """
 
 import streamlit as st
 import json
 import os
 from datetime import datetime
-from streamlit_webrtc import webrtc_streamer, WebRtcMode
-import av
-import numpy as np
-from collections import deque
-import threading
 import queue
-import requests
+import threading
+import numpy as np
+
+# WebRTC for audio capture
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+import av
+
+# Deepgram for transcription
+import websockets
+import asyncio
+import base64
 
 # Page config
 st.set_page_config(
@@ -39,26 +39,11 @@ st.markdown("""
         padding: 20px;
         border-radius: 10px;
         margin: 10px 0;
-        animation: pulse 0.5s ease-in-out;
+        color: white;
+        font-weight: bold;
     }
-    @keyframes pulse {
-        0% { transform: scale(0.95); }
-        50% { transform: scale(1.02); }
-        100% { transform: scale(1); }
-    }
-    .market-card {
-        background: #1a1a2e;
-        padding: 15px;
-        border-radius: 8px;
-        margin: 5px 0;
-    }
-    .transcript-box {
-        background: #0f0f23;
-        padding: 15px;
-        border-radius: 8px;
-        font-family: monospace;
-        max-height: 300px;
-        overflow-y: auto;
+    .stAlert {
+        margin-top: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -68,78 +53,79 @@ if 'transcripts' not in st.session_state:
     st.session_state.transcripts = []
 if 'triggers_detected' not in st.session_state:
     st.session_state.triggers_detected = []
-if 'trades_executed' not in st.session_state:
-    st.session_state.trades_executed = []
 if 'triggered_contracts' not in st.session_state:
     st.session_state.triggered_contracts = set()
-if 'audio_queue' not in st.session_state:
-    st.session_state.audio_queue = queue.Queue()
+if 'is_listening' not in st.session_state:
+    st.session_state.is_listening = False
 
-# Load trigger map from environment or default
-def load_trigger_map():
-    """Load the trigger map from environment or use defaults."""
-    default_triggers = {
-        # First degree (direct contract words)
-        "retirement": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 1},
-        "blockchain": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 1},
-        "bitcoin": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 1},
-        "election": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 1},
-        "acquisition": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 1},
-        "acquired": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 1},
-        "economy": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 1},
-        "economic": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 1},
-        "kalshi": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 1},
-        "susquehanna": {"contract": "SIG", "ticker": "KXVLADTENEVMENTION-25DEC17-SIG", "degree": 1},
-        "sig": {"contract": "SIG", "ticker": "KXVLADTENEVMENTION-25DEC17-SIG", "degree": 1},
-        "tokenization": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 1},
-        "tokenized": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 1},
-        "sport": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 1},
-        "innovation": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 1},
-        "innovate": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 1},
-        "gold": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 1},
-        
-        # Second degree (what Vlad actually says)
-        "crypto": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
-        "btc": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
-        "solana": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
-        "ethereum": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
-        "coinbase": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
-        "bitstamp": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
-        "x1": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
-        "drivewealth": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
-        "merger": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
-        "deal": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
-        "prediction market": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
-        "polymarket": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
-        "event contracts": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
-        "robinhood gold": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
-        "legend": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
-        "cortex": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
-        "staking": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
-        "roth ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
-        "401k": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
-        "ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
-        "smart contract": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
-        "layer 1": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
-        "gdp": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
-        "inflation": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
-        "fed": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
-        "nfl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
-        "nba": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
-        "super bowl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
-    }
+# Trigger map - 1st and 2nd degree
+TRIGGER_MAP = {
+    # First degree (direct contract words)
+    "retirement": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 1},
+    "blockchain": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 1},
+    "bitcoin": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 1},
+    "election": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 1},
+    "acquisition": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 1},
+    "acquired": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 1},
+    "economy": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 1},
+    "economic": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 1},
+    "kalshi": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 1},
+    "susquehanna": {"contract": "SIG", "ticker": "KXVLADTENEVMENTION-25DEC17-SIG", "degree": 1},
+    "sig": {"contract": "SIG", "ticker": "KXVLADTENEVMENTION-25DEC17-SIG", "degree": 1},
+    "tokenization": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 1},
+    "tokenized": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 1},
+    "sport": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 1},
+    "sports": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 1},
+    "innovation": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 1},
+    "innovate": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 1},
+    "gold": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 1},
     
-    # Try to load from environment (JSON string)
-    env_triggers = os.environ.get('TRIGGER_MAP_JSON')
-    if env_triggers:
-        try:
-            return json.loads(env_triggers)
-        except:
-            pass
-    
-    return default_triggers
+    # Second degree (what Vlad actually says -> maps to contracts)
+    "crypto": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "cryptocurrency": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "btc": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "solana": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "ethereum": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "coinbase": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "satoshi": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "bitstamp": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "x1": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "drivewealth": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "merger": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "deal": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "buyout": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "prediction market": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
+    "prediction markets": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
+    "polymarket": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
+    "event contracts": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
+    "robinhood gold": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
+    "gold card": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
+    "legend": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
+    "cortex": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
+    "ai": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
+    "artificial intelligence": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
+    "staking": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
+    "tokenize": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
+    "rwa": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
+    "roth ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
+    "401k": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
+    "ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
+    "smart contract": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
+    "layer 1": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
+    "on chain": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
+    "gdp": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
+    "inflation": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
+    "federal reserve": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
+    "interest rate": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
+    "nfl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
+    "nba": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
+    "super bowl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
+    "march madness": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
+    "presidential": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
+    "vote": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
+    "ballot": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
+}
 
-TRIGGER_MAP = load_trigger_map()
 NEGATION_WORDS = ['not', "don't", "won't", 'never', 'no', "isn't", "aren't", "wasn't", "weren't", "can't", "couldn't", "shouldn't", "wouldn't", 'without']
 
 
@@ -155,7 +141,7 @@ def check_for_triggers(text: str) -> list:
             continue
             
         if trigger in text_lower:
-            # Find trigger position
+            # Find trigger position for negation check
             trigger_words = trigger.split()
             trigger_idx = -1
             
@@ -172,7 +158,7 @@ def check_for_triggers(text: str) -> list:
             if trigger_idx == -1:
                 continue
             
-            # Check for negation
+            # Check for negation in preceding words
             is_negated = False
             for i in range(max(0, trigger_idx - 4), trigger_idx):
                 if any(neg in words[i] for neg in NEGATION_WORDS):
@@ -186,14 +172,14 @@ def check_for_triggers(text: str) -> list:
                     'ticker': data['ticker'],
                     'degree': data.get('degree', 1),
                     'timestamp': datetime.now().strftime('%H:%M:%S'),
-                    'context': text
+                    'context': text[:100]
                 })
     
     return found_triggers
 
 
 def process_transcript(text: str):
-    """Process incoming transcript text."""
+    """Process transcript text for triggers."""
     if not text.strip():
         return
     
@@ -210,148 +196,213 @@ def process_transcript(text: str):
         st.session_state.triggered_contracts.add(trigger['ticker'])
 
 
+# Audio processor for WebRTC
+class DeepgramAudioProcessor(AudioProcessorBase):
+    def __init__(self, deepgram_key: str, transcript_queue: queue.Queue):
+        self.deepgram_key = deepgram_key
+        self.transcript_queue = transcript_queue
+        self.ws = None
+        self.loop = None
+        self.connected = False
+        
+    async def connect_deepgram(self):
+        """Connect to Deepgram WebSocket."""
+        try:
+            url = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&smart_format=true&interim_results=true"
+            self.ws = await websockets.connect(
+                url,
+                extra_headers={"Authorization": f"Token {self.deepgram_key}"}
+            )
+            self.connected = True
+            
+            # Start receiving task
+            asyncio.create_task(self.receive_transcripts())
+        except Exception as e:
+            print(f"Deepgram connection error: {e}")
+            self.connected = False
+    
+    async def receive_transcripts(self):
+        """Receive transcripts from Deepgram."""
+        try:
+            async for message in self.ws:
+                data = json.loads(message)
+                if 'channel' in data:
+                    transcript = data['channel']['alternatives'][0].get('transcript', '')
+                    is_final = data.get('is_final', False)
+                    if transcript and is_final:
+                        self.transcript_queue.put(transcript)
+        except Exception as e:
+            print(f"Receive error: {e}")
+    
+    async def send_audio(self, audio_bytes):
+        """Send audio to Deepgram."""
+        if self.ws and self.connected:
+            try:
+                await self.ws.send(audio_bytes)
+            except Exception as e:
+                print(f"Send error: {e}")
+    
+    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+        """Process incoming audio frame."""
+        # Convert to bytes
+        audio_data = frame.to_ndarray().tobytes()
+        
+        # Send to Deepgram (in background)
+        if self.loop is None:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_until_complete(self.connect_deepgram())
+        
+        if self.connected:
+            self.loop.run_until_complete(self.send_audio(audio_data))
+        
+        return frame
+
+
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # API Keys
-    st.subheader("🔑 API Keys")
+    # API Key
     deepgram_key = st.text_input(
-        "Deepgram API Key",
+        "🔑 Deepgram API Key",
         type="password",
         value=os.environ.get('DEEPGRAM_API_KEY', ''),
-        help="Get your key at console.deepgram.com"
+        help="Required for live audio transcription"
     )
     
-    st.divider()
-    
-    # Trading Settings
-    st.subheader("💰 Trading Settings")
-    quantity = st.number_input("Contracts per trade", value=10, min_value=1, max_value=100)
-    max_price = st.slider("Max price (¢)", 50, 99, 85)
-    dry_run = st.checkbox("🔒 Dry Run Mode", value=True, help="No real trades")
+    if not deepgram_key:
+        st.warning("⚠️ Enter Deepgram API key to enable live audio")
     
     st.divider()
     
     # Stats
     st.subheader("📊 Session Stats")
-    st.metric("Triggers Detected", len(st.session_state.triggers_detected))
-    st.metric("Trades Executed", len(st.session_state.trades_executed))
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Triggers", len(st.session_state.triggers_detected))
+    with col2:
+        st.metric("Contracts", len(st.session_state.triggered_contracts))
+    
     st.metric("Transcripts", len(st.session_state.transcripts))
     
-    # Reset button
+    # Reset
     if st.button("🗑️ Reset Session", use_container_width=True):
         st.session_state.transcripts = []
         st.session_state.triggers_detected = []
-        st.session_state.trades_executed = []
         st.session_state.triggered_contracts = set()
         st.rerun()
 
-
 # Main content
 st.title("🎙️ Keynote Scalper")
-st.caption("Real-time speech-to-trade for 'What will X say?' markets")
+st.caption("Live speech-to-trade for Kalshi 'What will X say?' markets | Robinhood YES/NO Keynote")
 
-# Mode indicator
-mode_col1, mode_col2 = st.columns([1, 3])
-with mode_col1:
-    if dry_run:
-        st.warning("🟡 **DRY RUN MODE**")
-    else:
-        st.error("🔴 **LIVE TRADING**")
-with mode_col2:
-    st.info(f"Max Price: {max_price}¢ | Quantity: {quantity} contracts")
+# Tabs
+tab1, tab2, tab3 = st.tabs(["🎤 Live Audio", "🎯 Triggers", "📊 Markets"])
 
-# Main tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🎤 Live Capture", "🎯 Triggers", "📊 Markets", "📜 History"])
-
-# Tab 1: Live Capture
 with tab1:
-    st.header("Audio Capture")
+    st.header("Live Audio Transcription")
     
-    # Manual input section
-    st.subheader("📝 Manual Transcript Input")
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        manual_text = st.text_area(
-            "Enter transcript text",
-            placeholder="Type or paste transcript here...",
-            height=100,
-            label_visibility="collapsed"
+    if deepgram_key:
+        st.success("✅ Deepgram connected - Click START to begin listening")
+        
+        # Create transcript queue
+        if 'transcript_queue' not in st.session_state:
+            st.session_state.transcript_queue = queue.Queue()
+        
+        # WebRTC streamer for audio capture
+        webrtc_ctx = webrtc_streamer(
+            key="keynote-audio",
+            mode=WebRtcMode.SENDONLY,
+            audio_receiver_size=1024,
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            media_stream_constraints={"audio": True, "video": False},
         )
+        
+        if webrtc_ctx.state.playing:
+            st.info("🔴 **LIVE** - Listening for triggers...")
+            
+            # Note about audio processing
+            st.caption("""
+            **How it works:**
+            1. Your browser captures audio from your microphone
+            2. Audio is sent to Deepgram for real-time transcription
+            3. Transcripts are checked for trigger words
+            4. Triggers are logged for trading
+            
+            **Tip:** Play the keynote through your speakers - your mic will pick it up!
+            """)
+    else:
+        st.warning("⚠️ Enter your Deepgram API key in the sidebar to enable live audio")
+    
+    st.divider()
+    
+    # Manual input fallback
+    st.subheader("📝 Manual Input (Fallback)")
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        manual_text = st.text_input("Type what you hear:", placeholder="Enter transcript text...")
     with col2:
-        if st.button("🚀 Process", use_container_width=True, type="primary"):
+        if st.button("Process", type="primary"):
             if manual_text:
                 process_transcript(manual_text)
                 st.rerun()
     
     st.divider()
     
-    # Recent transcript
-    st.subheader("📜 Recent Transcript")
+    # Live transcript display
+    st.subheader("📜 Live Transcript")
     transcript_container = st.container()
     with transcript_container:
         if st.session_state.transcripts:
-            for t in st.session_state.transcripts[-10:]:
+            for t in st.session_state.transcripts[-15:]:
                 st.text(f"[{t['time']}] {t['text']}")
         else:
-            st.caption("No transcripts yet. Use manual input or audio capture.")
+            st.caption("Transcripts will appear here...")
     
     # Trigger alerts
     if st.session_state.triggers_detected:
         st.divider()
-        st.subheader("🚨 Recent Triggers")
-        for trigger in st.session_state.triggers_detected[-5:]:
-            degree_icon = "1️⃣" if trigger['degree'] == 1 else "2️⃣"
-            st.markdown(f"""
-            <div class="trigger-alert">
-                <strong>{degree_icon} 🎯 TRIGGER: "{trigger['trigger']}"</strong><br>
-                Contract: {trigger['contract']} | Ticker: {trigger['ticker'][-4:]}<br>
-                <small>{trigger['timestamp']}</small>
-            </div>
-            """, unsafe_allow_html=True)
+        st.subheader("🚨 TRIGGER ALERTS")
+        for trigger in reversed(st.session_state.triggers_detected[-5:]):
+            degree_label = "1st°" if trigger['degree'] == 1 else "2nd°"
+            st.error(f"🎯 **{trigger['trigger'].upper()}** → {trigger['contract']} ({degree_label}) @ {trigger['timestamp']}")
 
-# Tab 2: Triggers
 with tab2:
     st.header("🎯 Trigger Map")
+    st.caption("1st Degree = Contract words | 2nd Degree = What Vlad actually says")
     
-    # Group by contract
+    # Group triggers by contract
     contracts = {}
     for trigger, data in TRIGGER_MAP.items():
         contract = data['contract']
         if contract not in contracts:
             contracts[contract] = {'first': [], 'second': []}
-        if data.get('degree', 1) == 1:
+        if data['degree'] == 1:
             contracts[contract]['first'].append(trigger)
         else:
             contracts[contract]['second'].append(trigger)
     
-    # Display as cards
-    for contract, triggers in sorted(contracts.items()):
-        triggered = any(
-            t['contract'] == contract 
-            for t in st.session_state.triggers_detected
-        )
+    # Display
+    for contract in sorted(contracts.keys()):
+        triggers = contracts[contract]
+        triggered = contract in [t['contract'] for t in st.session_state.triggers_detected]
         icon = "✅" if triggered else "⏳"
         
-        with st.expander(f"{icon} {contract}", expanded=not triggered):
+        with st.expander(f"{icon} **{contract}**", expanded=not triggered):
             col1, col2 = st.columns(2)
             with col1:
-                st.markdown("**1st Degree (Contract Words)**")
-                for t in triggers['first']:
-                    st.code(t)
+                st.markdown("**1st Degree (Direct)**")
+                st.code(", ".join(triggers['first']))
             with col2:
-                st.markdown("**2nd Degree (What Vlad Says)**")
-                for t in triggers['second'][:8]:
-                    st.code(t)
-                if len(triggers['second']) > 8:
-                    st.caption(f"... and {len(triggers['second']) - 8} more")
+                st.markdown("**2nd Degree (Vlad Says)**")
+                st.code(", ".join(triggers['second'][:10]))
+                if len(triggers['second']) > 10:
+                    st.caption(f"+{len(triggers['second'])-10} more")
 
-# Tab 3: Markets
 with tab3:
-    st.header("📊 Current Markets")
+    st.header("📊 Market Status")
     
-    # Market data (static for now, would refresh from Kalshi)
     markets = [
         {"word": "Retirement", "ask": 17, "ticker": "RETI"},
         {"word": "Blockchain", "ask": 22, "ticker": "BLOC"},
@@ -369,49 +420,22 @@ with tab3:
     
     for m in markets:
         upside = 100 - m['ask']
-        triggered = any(
-            t['contract'] == m['word'] 
-            for t in st.session_state.triggers_detected
-        )
+        triggered = m['word'] in [t['contract'] for t in st.session_state.triggers_detected]
         
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 2])
         with col1:
-            icon = "✅" if triggered else "🟢" if m['ask'] < max_price else "🔴"
+            icon = "✅" if triggered else "🟢" if m['ask'] < 85 else "🔴"
             st.write(f"{icon} **{m['word']}**")
         with col2:
-            st.write(f"Ask: {m['ask']}¢")
+            st.write(f"{m['ask']}¢")
         with col3:
-            st.write(f"Upside: {upside}¢")
+            st.write(f"+{upside}¢")
         with col4:
-            if not triggered and m['ask'] < max_price:
-                st.progress(upside / 100)
-            elif triggered:
-                st.write("✅ Done")
+            if triggered:
+                st.success("TRIGGERED")
             else:
-                st.write("—")
-
-# Tab 4: History
-with tab4:
-    st.header("📜 Session History")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Triggers Detected")
-        if st.session_state.triggers_detected:
-            for t in reversed(st.session_state.triggers_detected):
-                st.write(f"**{t['trigger']}** → {t['contract']} ({t['timestamp']})")
-        else:
-            st.caption("No triggers yet")
-    
-    with col2:
-        st.subheader("Trades Executed")
-        if st.session_state.trades_executed:
-            for t in reversed(st.session_state.trades_executed):
-                st.write(f"✅ {t['contract']} @ {t['price']}¢")
-        else:
-            st.caption("No trades yet")
+                st.progress(upside / 100)
 
 # Footer
 st.divider()
-st.caption(f"Session started: {datetime.now().strftime('%Y-%m-%d %H:%M')} | Triggers loaded: {len(TRIGGER_MAP)}")
+st.caption(f"Triggers loaded: {len(TRIGGER_MAP)} | Contracts: 12 | Event: Robinhood YES/NO Dec 16, 2024")
