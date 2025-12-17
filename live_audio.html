@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Live Keynote Scalper</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #4CAF50; margin-bottom: 5px; }
+        .subtitle { color: #888; margin-bottom: 20px; }
+        
+        .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+        
+        .card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .card h2 { margin-top: 0; color: #4CAF50; font-size: 18px; }
+        
+        .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .config-item label { display: block; color: #888; font-size: 12px; margin-bottom: 5px; }
+        .config-item input, .config-item select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background: #16213e;
+            color: #fff;
+            font-size: 14px;
+        }
+        
+        .btn-group { display: flex; gap: 10px; margin: 20px 0; }
+        .btn {
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-start { background: #4CAF50; color: white; }
+        .btn-start:hover { background: #45a049; }
+        .btn-start:disabled { background: #333; cursor: not-allowed; }
+        .btn-stop { background: #f44336; color: white; }
+        .btn-stop:hover { background: #d32f2f; }
+        .btn-stop:disabled { background: #333; cursor: not-allowed; }
+        
+        .status-bar {
+            padding: 12px 15px;
+            background: #16213e;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .status-dot.live { background: #f44336; animation: pulse 1s infinite; }
+        .status-dot.ready { background: #4CAF50; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        
+        #transcript-box {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .transcript-line { margin: 5px 0; }
+        .transcript-line.final { color: #00ff00; }
+        .transcript-line.interim { color: #666; font-style: italic; }
+        
+        .trigger-alert {
+            display: none;
+            padding: 15px;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            border-radius: 8px;
+            margin: 15px 0;
+            animation: triggerPulse 0.3s ease-out;
+        }
+        @keyframes triggerPulse {
+            0% { transform: scale(0.95); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        
+        .market-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .market-item:last-child { border-bottom: none; }
+        .market-word { font-weight: bold; }
+        .market-price { color: #4CAF50; }
+        .market-price.expensive { color: #f44336; }
+        
+        .trade-item {
+            padding: 10px;
+            background: #16213e;
+            border-radius: 6px;
+            margin: 8px 0;
+            border-left: 4px solid #4CAF50;
+        }
+        .trade-item.failed { border-left-color: #f44336; }
+        
+        .mode-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        .mode-badge.dry-run { background: #ff9800; color: #000; }
+        .mode-badge.live { background: #f44336; color: #fff; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        .stat-box {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value { font-size: 28px; font-weight: bold; color: #4CAF50; }
+        .stat-label { font-size: 12px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Live Keynote Scalper</h1>
+        <p class="subtitle">Real-time speech-to-trade for "What will X say?" markets</p>
+        
+        <div class="grid">
+            <!-- Left Column -->
+            <div>
+                <!-- Config -->
+                <div class="card">
+                    <h2>⚙️ Configuration</h2>
+                    <div class="config-grid">
+                        <div class="config-item">
+                            <label>Deepgram API Key</label>
+                            <input type="password" id="apiKey" placeholder="Enter your Deepgram API key">
+                        </div>
+                        <div class="config-item">
+                            <label>Trading Mode</label>
+                            <select id="tradingMode">
+                                <option value="dry">🟡 Dry Run (No real trades)</option>
+                                <option value="live">🔴 LIVE Trading</option>
+                            </select>
+                        </div>
+                        <div class="config-item">
+                            <label>Contracts per Trade</label>
+                            <input type="number" id="quantity" value="10" min="1" max="100">
+                        </div>
+                        <div class="config-item">
+                            <label>Max Price (¢)</label>
+                            <input type="number" id="maxPrice" value="85" min="50" max="99">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Controls -->
+                <div class="card">
+                    <h2>🎤 Audio Capture</h2>
+                    <div class="btn-group">
+                        <button class="btn btn-start" id="startBtn" onclick="startListening()">
+                            🎙️ START LISTENING
+                        </button>
+                        <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>
+                            ⏹️ STOP
+                        </button>
+                    </div>
+                    
+                    <div class="status-bar">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span id="statusText">Ready - Enter API key and click Start</span>
+                    </div>
+                    
+                    <div class="trigger-alert" id="triggerAlert">
+                        <strong>🎯 TRIGGER DETECTED!</strong>
+                        <span id="triggerDetails"></span>
+                    </div>
+                </div>
+                
+                <!-- Transcript -->
+                <div class="card">
+                    <h2>📜 Live Transcript</h2>
+                    <div id="transcript-box">
+                        <div class="transcript-line" style="color: #666;">
+                            Transcript will appear here when you start listening...
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right Column -->
+            <div>
+                <!-- Mode & Stats -->
+                <div class="card">
+                    <h2>📊 Status</h2>
+                    <div style="text-align: center; margin-bottom: 15px;">
+                        <span class="mode-badge dry-run" id="modeBadge">🟡 DRY RUN</span>
+                    </div>
+                    <div class="stats-grid">
+                        <div class="stat-box">
+                            <div class="stat-value" id="tradesCount">0</div>
+                            <div class="stat-label">Trades</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="triggersCount">0</div>
+                            <div class="stat-label">Triggers</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-value" id="wordsCount">0</div>
+                            <div class="stat-label">Words</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Markets -->
+                <div class="card">
+                    <h2>📈 Target Markets</h2>
+                    <div id="markets-list">
+                        <div class="market-item"><span class="market-word">Retirement</span><span class="market-price">17¢</span></div>
+                        <div class="market-item"><span class="market-word">Blockchain</span><span class="market-price">22¢</span></div>
+                        <div class="market-item"><span class="market-word">Bitcoin</span><span class="market-price">27¢</span></div>
+                        <div class="market-item"><span class="market-word">Election</span><span class="market-price">39¢</span></div>
+                        <div class="market-item"><span class="market-word">Acquisition</span><span class="market-price">39¢</span></div>
+                        <div class="market-item"><span class="market-word">Kalshi</span><span class="market-price">42¢</span></div>
+                        <div class="market-item"><span class="market-word">Economy</span><span class="market-price">42¢</span></div>
+                        <div class="market-item"><span class="market-word">Tokenization</span><span class="market-price">66¢</span></div>
+                        <div class="market-item"><span class="market-word">Sport</span><span class="market-price">72¢</span></div>
+                        <div class="market-item"><span class="market-word">Innovation</span><span class="market-price">79¢</span></div>
+                        <div class="market-item"><span class="market-word">Gold</span><span class="market-price">84¢</span></div>
+                    </div>
+                </div>
+                
+                <!-- Trades -->
+                <div class="card">
+                    <h2>💰 Trade History</h2>
+                    <div id="trades-list">
+                        <p style="color: #666; text-align: center;">No trades yet...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // State
+        let mediaRecorder;
+        let socket;
+        let isListening = false;
+        let triggeredContracts = new Set();
+        let tradesCount = 0;
+        let triggersCount = 0;
+        let wordsCount = 0;
+        
+        // Trigger mappings: trigger word -> { contract, ticker }
+        const TRIGGER_MAP = {
+            // Direct matches
+            'retirement': { contract: 'Retirement', ticker: 'KXVLADTENEVMENTION-25DEC17-RETI' },
+            'blockchain': { contract: 'Blockchain', ticker: 'KXVLADTENEVMENTION-25DEC17-BLOC' },
+            'bitcoin': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'election': { contract: 'Election', ticker: 'KXVLADTENEVMENTION-25DEC17-ELEC' },
+            'acquisition': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
+            'acquired': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
+            'kalshi': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+            'economy': { contract: 'Economy', ticker: 'KXVLADTENEVMENTION-25DEC17-ECON' },
+            'economic': { contract: 'Economy', ticker: 'KXVLADTENEVMENTION-25DEC17-ECON' },
+            'tokenization': { contract: 'Tokenization', ticker: 'KXVLADTENEVMENTION-25DEC17-TOKE' },
+            'tokenized': { contract: 'Tokenization', ticker: 'KXVLADTENEVMENTION-25DEC17-TOKE' },
+            'sport': { contract: 'Sport', ticker: 'KXVLADTENEVMENTION-25DEC17-SPOR' },
+            'sports': { contract: 'Sport', ticker: 'KXVLADTENEVMENTION-25DEC17-SPOR' },
+            'innovation': { contract: 'Innovation', ticker: 'KXVLADTENEVMENTION-25DEC17-INNO' },
+            'innovate': { contract: 'Innovation', ticker: 'KXVLADTENEVMENTION-25DEC17-INNO' },
+            'gold': { contract: 'Gold', ticker: 'KXVLADTENEVMENTION-25DEC17-GOLD' },
+            'susquehanna': { contract: 'SIG', ticker: 'KXVLADTENEVMENTION-25DEC17-SIG' },
+            'sig': { contract: 'SIG', ticker: 'KXVLADTENEVMENTION-25DEC17-SIG' },
+            
+            // Second-derivative triggers
+            'crypto': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'cryptocurrency': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'solana': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'ethereum': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'bitstamp': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
+            'prediction market': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+            'prediction markets': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+            'betting': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+        };
+        
+        const NEGATION_WORDS = ['not', "don't", "won't", 'never', 'no', "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "can't", "couldn't", "shouldn't", "wouldn't", 'without'];
+        
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const transcriptBox = document.getElementById('transcript-box');
+        const triggerAlert = document.getElementById('triggerAlert');
+        const triggerDetails = document.getElementById('triggerDetails');
+        const modeBadge = document.getElementById('modeBadge');
+        const tradesList = document.getElementById('trades-list');
+        
+        // Update mode badge when changed
+        document.getElementById('tradingMode').addEventListener('change', function() {
+            if (this.value === 'live') {
+                modeBadge.textContent = '🔴 LIVE TRADING';
+                modeBadge.className = 'mode-badge live';
+            } else {
+                modeBadge.textContent = '🟡 DRY RUN';
+                modeBadge.className = 'mode-badge dry-run';
+            }
+        });
+        
+        function updateStatus(text, state) {
+            statusText.textContent = text;
+            statusDot.className = 'status-dot ' + state;
+        }
+        
+        function updateStats() {
+            document.getElementById('tradesCount').textContent = tradesCount;
+            document.getElementById('triggersCount').textContent = triggersCount;
+            document.getElementById('wordsCount').textContent = wordsCount;
+        }
+        
+        function showTrigger(triggerWord, contract, ticker) {
+            triggersCount++;
+            updateStats();
+            
+            triggerDetails.textContent = ` "${triggerWord}" → ${contract}`;
+            triggerAlert.style.display = 'block';
+            
+            // Flash effect
+            triggerAlert.style.animation = 'none';
+            triggerAlert.offsetHeight; // Trigger reflow
+            triggerAlert.style.animation = 'triggerPulse 0.3s ease-out';
+            
+            setTimeout(() => { triggerAlert.style.display = 'none'; }, 4000);
+            
+            // Execute trade
+            executeTrade(triggerWord, contract, ticker);
+        }
+        
+        function executeTrade(triggerWord, contract, ticker) {
+            const isDryRun = document.getElementById('tradingMode').value === 'dry';
+            const quantity = parseInt(document.getElementById('quantity').value);
+            
+            // Record trade
+            tradesCount++;
+            updateStats();
+            
+            const tradeHtml = `
+                <div class="trade-item">
+                    <strong>${isDryRun ? '🟡' : '🟢'} ${triggerWord}</strong> → ${contract}<br>
+                    <small style="color: #888;">${new Date().toLocaleTimeString()} | ${isDryRun ? 'DRY RUN' : 'LIVE'} | ${quantity} contracts</small>
+                </div>
+            `;
+            
+            if (tradesList.querySelector('p')) {
+                tradesList.innerHTML = '';
+            }
+            tradesList.insertAdjacentHTML('afterbegin', tradeHtml);
+            
+            // Mark contract as triggered
+            triggeredContracts.add(ticker);
+            
+            console.log(`🎯 TRADE: ${triggerWord} → ${contract} (${ticker}) | Mode: ${isDryRun ? 'DRY' : 'LIVE'}`);
+        }
+        
+        function checkForTriggers(text) {
+            const lower = text.toLowerCase();
+            const words = lower.split(/\s+/);
+            wordsCount += words.length;
+            updateStats();
+            
+            for (const [trigger, data] of Object.entries(TRIGGER_MAP)) {
+                // Skip if already triggered this contract
+                if (triggeredContracts.has(data.ticker)) continue;
+                
+                // Check if trigger exists in text
+                if (lower.includes(trigger)) {
+                    // Find trigger position
+                    const triggerWords = trigger.split(' ');
+                    let triggerIndex = -1;
+                    
+                    for (let i = 0; i <= words.length - triggerWords.length; i++) {
+                        let match = true;
+                        for (let j = 0; j < triggerWords.length; j++) {
+                            if (!words[i + j].includes(triggerWords[j])) {
+                                match = false;
+                                break;
+                            }
+                        }
+                        if (match) {
+                            triggerIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    if (triggerIndex === -1) continue;
+                    
+                    // Check for negation in preceding 4 words
+                    let isNegated = false;
+                    for (let i = Math.max(0, triggerIndex - 4); i < triggerIndex; i++) {
+                        if (NEGATION_WORDS.some(neg => words[i].includes(neg))) {
+                            isNegated = true;
+                            console.log(`⚠️ Negation detected for "${trigger}"`);
+                            break;
+                        }
+                    }
+                    
+                    if (!isNegated) {
+                        showTrigger(trigger, data.contract, data.ticker);
+                    }
+                }
+            }
+        }
+        
+        async function startListening() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (!apiKey) {
+                alert('Please enter your Deepgram API key');
+                return;
+            }
+            
+            try {
+                updateStatus('Requesting microphone access...', '');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+                
+                updateStatus('Connecting to Deepgram...', '');
+                
+                // Connect to Deepgram
+                socket = new WebSocket(
+                    'wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&smart_format=true&punctuate=true&interim_results=true',
+                    ['token', apiKey]
+                );
+                
+                socket.onopen = () => {
+                    updateStatus('🔴 LIVE - Listening for triggers...', 'live');
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    isListening = true;
+                    
+                    // Clear transcript
+                    transcriptBox.innerHTML = '';
+                    
+                    // Start recording
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+                            socket.send(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.start(250); // 250ms chunks for low latency
+                };
+                
+                socket.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.channel?.alternatives?.[0]) {
+                        const transcript = data.channel.alternatives[0].transcript;
+                        if (transcript) {
+                            const isFinal = data.is_final;
+                            
+                            // Add to transcript box
+                            const lineClass = isFinal ? 'final' : 'interim';
+                            const lineHtml = `<div class="transcript-line ${lineClass}">${transcript}</div>`;
+                            
+                            if (isFinal) {
+                                // Remove interim and add final
+                                const interims = transcriptBox.querySelectorAll('.interim');
+                                interims.forEach(el => el.remove());
+                                transcriptBox.insertAdjacentHTML('beforeend', lineHtml);
+                                
+                                // Check for triggers!
+                                checkForTriggers(transcript);
+                            } else {
+                                // Update interim
+                                const existing = transcriptBox.querySelector('.interim');
+                                if (existing) {
+                                    existing.textContent = transcript;
+                                } else {
+                                    transcriptBox.insertAdjacentHTML('beforeend', lineHtml);
+                                }
+                            }
+                            
+                            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+                        }
+                    }
+                };
+                
+                socket.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateStatus('Connection error', '');
+                };
+                
+                socket.onclose = () => {
+                    if (isListening) {
+                        updateStatus('Disconnected', '');
+                        stopListening();
+                    }
+                };
+                
+            } catch (error) {
+                console.error('Error:', error);
+                updateStatus('Error: ' + error.message, '');
+            }
+        }
+        
+        function stopListening() {
+            isListening = false;
+            
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            updateStatus('Stopped', 'ready');
+        }
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && e.ctrlKey) {
+                e.preventDefault();
+                if (isListening) {
+                    stopListening();
+                } else {
+                    startListening();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
