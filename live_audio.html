@@ -14,9 +14,31 @@
             padding: 20px;
             min-height: 100vh;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
+        .container { max-width: 1600px; margin: 0 auto; }
         h1 { color: #4CAF50; margin-bottom: 5px; }
         .subtitle { color: #888; margin-bottom: 20px; }
+        
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #333;
+        }
+        .tab {
+            padding: 12px 24px;
+            background: #1a1a2e;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            color: #888;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.2s;
+        }
+        .tab:hover { background: #252542; color: #fff; }
+        .tab.active { background: #4CAF50; color: #fff; }
+        
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         
         .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
         @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
@@ -143,6 +165,119 @@
         }
         .stat-value { font-size: 28px; font-weight: bold; color: #4CAF50; }
         .stat-label { font-size: 12px; color: #888; }
+        
+        /* Mind Map Styles */
+        .mindmap-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 10px;
+        }
+        
+        .mindmap-node {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 15px;
+            border: 2px solid #333;
+            transition: all 0.3s;
+        }
+        
+        .mindmap-node:hover {
+            border-color: #4CAF50;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        }
+        
+        .mindmap-node.triggered {
+            border-color: #4CAF50;
+            background: #1e3a1e;
+        }
+        
+        .node-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #333;
+        }
+        
+        .node-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        
+        .node-price {
+            font-size: 16px;
+            color: #888;
+        }
+        
+        .node-price.good { color: #4CAF50; }
+        .node-price.expensive { color: #f44336; }
+        
+        .derivative-section {
+            margin-top: 10px;
+        }
+        
+        .derivative-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        
+        .derivative-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        
+        .derivative-tag {
+            padding: 4px 10px;
+            background: #16213e;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #aaa;
+            border: 1px solid #333;
+        }
+        
+        .derivative-tag.first-degree {
+            background: #2a4a2a;
+            border-color: #4CAF50;
+            color: #4CAF50;
+        }
+        
+        .derivative-tag.second-degree {
+            background: #2a2a4a;
+            border-color: #6495ED;
+            color: #6495ED;
+        }
+        
+        .derivative-tag.matched {
+            animation: tagPulse 0.5s;
+        }
+        
+        @keyframes tagPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        .upside-bar {
+            width: 100%;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .upside-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #66BB6A);
+            transition: width 0.3s;
+        }
     </style>
 </head>
 <body>
@@ -150,118 +285,130 @@
         <h1>🎙️ Live Keynote Scalper</h1>
         <p class="subtitle">Real-time speech-to-trade for "What will X say?" markets</p>
         
-        <div class="grid">
-            <!-- Left Column -->
-            <div>
-                <!-- Config -->
-                <div class="card">
-                    <h2>⚙️ Configuration</h2>
-                    <div class="config-grid">
-                        <div class="config-item">
-                            <label>Deepgram API Key</label>
-                            <input type="password" id="apiKey" placeholder="Enter your Deepgram API key">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('live')">🎤 Live Audio</button>
+            <button class="tab" onclick="switchTab('mindmap')">🧠 Mind Map</button>
+            <button class="tab" onclick="switchTab('markets')">📊 Markets</button>
+        </div>
+        
+        <!-- Tab: Live Audio -->
+        <div id="tab-live" class="tab-content active">
+            <div class="grid">
+                <!-- Left Column -->
+                <div>
+                    <!-- Config -->
+                    <div class="card">
+                        <h2>⚙️ Configuration</h2>
+                        <div class="config-grid">
+                            <div class="config-item">
+                                <label>Deepgram API Key</label>
+                                <input type="password" id="apiKey" placeholder="Enter your Deepgram API key">
+                            </div>
+                            <div class="config-item">
+                                <label>Trading Mode</label>
+                                <select id="tradingMode">
+                                    <option value="dry">🟡 Dry Run (No real trades)</option>
+                                    <option value="live">🔴 LIVE Trading</option>
+                                </select>
+                            </div>
+                            <div class="config-item">
+                                <label>Contracts per Trade</label>
+                                <input type="number" id="quantity" value="10" min="1" max="100">
+                            </div>
+                            <div class="config-item">
+                                <label>Max Price (¢)</label>
+                                <input type="number" id="maxPrice" value="85" min="50" max="99">
+                            </div>
                         </div>
-                        <div class="config-item">
-                            <label>Trading Mode</label>
-                            <select id="tradingMode">
-                                <option value="dry">🟡 Dry Run (No real trades)</option>
-                                <option value="live">🔴 LIVE Trading</option>
-                            </select>
+                    </div>
+                    
+                    <!-- Controls -->
+                    <div class="card">
+                        <h2>🎤 Audio Capture</h2>
+                        <div class="btn-group">
+                            <button class="btn btn-start" id="startBtn" onclick="startListening()">
+                                🎙️ START LISTENING
+                            </button>
+                            <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>
+                                ⏹️ STOP
+                            </button>
                         </div>
-                        <div class="config-item">
-                            <label>Contracts per Trade</label>
-                            <input type="number" id="quantity" value="10" min="1" max="100">
+                        
+                        <div class="status-bar">
+                            <div class="status-dot" id="statusDot"></div>
+                            <span id="statusText">Ready - Enter API key and click Start</span>
                         </div>
-                        <div class="config-item">
-                            <label>Max Price (¢)</label>
-                            <input type="number" id="maxPrice" value="85" min="50" max="99">
+                        
+                        <div class="trigger-alert" id="triggerAlert">
+                            <strong>🎯 TRIGGER DETECTED!</strong>
+                            <span id="triggerDetails"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Transcript -->
+                    <div class="card">
+                        <h2>📜 Live Transcript</h2>
+                        <div id="transcript-box">
+                            <div class="transcript-line" style="color: #666;">
+                                Transcript will appear here when you start listening...
+                            </div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- Controls -->
-                <div class="card">
-                    <h2>🎤 Audio Capture</h2>
-                    <div class="btn-group">
-                        <button class="btn btn-start" id="startBtn" onclick="startListening()">
-                            🎙️ START LISTENING
-                        </button>
-                        <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>
-                            ⏹️ STOP
-                        </button>
+                <!-- Right Column -->
+                <div>
+                    <!-- Mode & Stats -->
+                    <div class="card">
+                        <h2>📊 Status</h2>
+                        <div style="text-align: center; margin-bottom: 15px;">
+                            <span class="mode-badge dry-run" id="modeBadge">🟡 DRY RUN</span>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat-box">
+                                <div class="stat-value" id="tradesCount">0</div>
+                                <div class="stat-label">Trades</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-value" id="triggersCount">0</div>
+                                <div class="stat-label">Triggers</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-value" id="wordsCount">0</div>
+                                <div class="stat-label">Words</div>
+                            </div>
+                        </div>
                     </div>
                     
-                    <div class="status-bar">
-                        <div class="status-dot" id="statusDot"></div>
-                        <span id="statusText">Ready - Enter API key and click Start</span>
-                    </div>
-                    
-                    <div class="trigger-alert" id="triggerAlert">
-                        <strong>🎯 TRIGGER DETECTED!</strong>
-                        <span id="triggerDetails"></span>
-                    </div>
-                </div>
-                
-                <!-- Transcript -->
-                <div class="card">
-                    <h2>📜 Live Transcript</h2>
-                    <div id="transcript-box">
-                        <div class="transcript-line" style="color: #666;">
-                            Transcript will appear here when you start listening...
+                    <!-- Trades -->
+                    <div class="card">
+                        <h2>💰 Trade History</h2>
+                        <div id="trades-list">
+                            <p style="color: #666; text-align: center;">No trades yet...</p>
                         </div>
                     </div>
                 </div>
             </div>
-            
-            <!-- Right Column -->
-            <div>
-                <!-- Mode & Stats -->
-                <div class="card">
-                    <h2>📊 Status</h2>
-                    <div style="text-align: center; margin-bottom: 15px;">
-                        <span class="mode-badge dry-run" id="modeBadge">🟡 DRY RUN</span>
-                    </div>
-                    <div class="stats-grid">
-                        <div class="stat-box">
-                            <div class="stat-value" id="tradesCount">0</div>
-                            <div class="stat-label">Trades</div>
-                        </div>
-                        <div class="stat-box">
-                            <div class="stat-value" id="triggersCount">0</div>
-                            <div class="stat-label">Triggers</div>
-                        </div>
-                        <div class="stat-box">
-                            <div class="stat-value" id="wordsCount">0</div>
-                            <div class="stat-label">Words</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Markets -->
-                <div class="card">
-                    <h2>📈 Target Markets</h2>
-                    <div id="markets-list">
-                        <div class="market-item"><span class="market-word">Retirement</span><span class="market-price">17¢</span></div>
-                        <div class="market-item"><span class="market-word">Blockchain</span><span class="market-price">22¢</span></div>
-                        <div class="market-item"><span class="market-word">Bitcoin</span><span class="market-price">27¢</span></div>
-                        <div class="market-item"><span class="market-word">Election</span><span class="market-price">39¢</span></div>
-                        <div class="market-item"><span class="market-word">Acquisition</span><span class="market-price">39¢</span></div>
-                        <div class="market-item"><span class="market-word">Kalshi</span><span class="market-price">42¢</span></div>
-                        <div class="market-item"><span class="market-word">Economy</span><span class="market-price">42¢</span></div>
-                        <div class="market-item"><span class="market-word">Tokenization</span><span class="market-price">66¢</span></div>
-                        <div class="market-item"><span class="market-word">Sport</span><span class="market-price">72¢</span></div>
-                        <div class="market-item"><span class="market-word">Innovation</span><span class="market-price">79¢</span></div>
-                        <div class="market-item"><span class="market-word">Gold</span><span class="market-price">84¢</span></div>
-                    </div>
-                </div>
-                
-                <!-- Trades -->
-                <div class="card">
-                    <h2>💰 Trade History</h2>
-                    <div id="trades-list">
-                        <p style="color: #666; text-align: center;">No trades yet...</p>
-                    </div>
-                </div>
+        </div>
+        
+        <!-- Tab: Mind Map -->
+        <div id="tab-mindmap" class="tab-content">
+            <div class="card">
+                <h2>🧠 Trigger Mind Map</h2>
+                <p style="color: #888; margin-bottom: 20px;">
+                    <strong style="color: #4CAF50;">1st Degree</strong> = Direct Kalshi contract words | 
+                    <strong style="color: #6495ED;">2nd Degree</strong> = Product names Vlad actually says
+                </p>
+                <div id="mindmap-container" class="mindmap-container"></div>
+            </div>
+        </div>
+        
+        <!-- Tab: Markets -->
+        <div id="tab-markets" class="tab-content">
+            <div class="card">
+                <h2>📊 Current Markets</h2>
+                <div id="markets-list"></div>
             </div>
         </div>
     </div>
@@ -276,66 +423,206 @@
         let triggersCount = 0;
         let wordsCount = 0;
         
-        // Trigger mappings: trigger word -> { contract, ticker }
+        // Market data
+        const MARKETS = {
+            'Retirement': { ask: 17, ticker: 'KXVLADTENEVMENTION-25DEC17-RETI' },
+            'Blockchain': { ask: 22, ticker: 'KXVLADTENEVMENTION-25DEC17-BLOC' },
+            'Bitcoin': { ask: 27, ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
+            'Election': { ask: 39, ticker: 'KXVLADTENEVMENTION-25DEC17-ELEC' },
+            'Acquisition': { ask: 39, ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
+            'Kalshi': { ask: 42, ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+            'Economy': { ask: 42, ticker: 'KXVLADTENEVMENTION-25DEC17-ECON' },
+            'Tokenization': { ask: 66, ticker: 'KXVLADTENEVMENTION-25DEC17-TOKE' },
+            'Sport': { ask: 72, ticker: 'KXVLADTENEVMENTION-25DEC17-SPOR' },
+            'Innovation': { ask: 79, ticker: 'KXVLADTENEVMENTION-25DEC17-INNO' },
+            'Gold': { ask: 84, ticker: 'KXVLADTENEVMENTION-25DEC17-GOLD' },
+            'SIG': { ask: 56, ticker: 'KXVLADTENEVMENTION-25DEC17-SIG' },
+        };
+        
+        // Trigger mappings with degrees
         const TRIGGER_MAP = {
-            // Direct matches
-            'retirement': { contract: 'Retirement', ticker: 'KXVLADTENEVMENTION-25DEC17-RETI' },
-            'blockchain': { contract: 'Blockchain', ticker: 'KXVLADTENEVMENTION-25DEC17-BLOC' },
-            'bitcoin': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
-            'election': { contract: 'Election', ticker: 'KXVLADTENEVMENTION-25DEC17-ELEC' },
-            'acquisition': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
-            'acquired': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
-            'kalshi': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
-            'economy': { contract: 'Economy', ticker: 'KXVLADTENEVMENTION-25DEC17-ECON' },
-            'economic': { contract: 'Economy', ticker: 'KXVLADTENEVMENTION-25DEC17-ECON' },
-            'tokenization': { contract: 'Tokenization', ticker: 'KXVLADTENEVMENTION-25DEC17-TOKE' },
-            'tokenized': { contract: 'Tokenization', ticker: 'KXVLADTENEVMENTION-25DEC17-TOKE' },
-            'sport': { contract: 'Sport', ticker: 'KXVLADTENEVMENTION-25DEC17-SPOR' },
-            'sports': { contract: 'Sport', ticker: 'KXVLADTENEVMENTION-25DEC17-SPOR' },
-            'innovation': { contract: 'Innovation', ticker: 'KXVLADTENEVMENTION-25DEC17-INNO' },
-            'innovate': { contract: 'Innovation', ticker: 'KXVLADTENEVMENTION-25DEC17-INNO' },
-            'gold': { contract: 'Gold', ticker: 'KXVLADTENEVMENTION-25DEC17-GOLD' },
-            'susquehanna': { contract: 'SIG', ticker: 'KXVLADTENEVMENTION-25DEC17-SIG' },
-            'sig': { contract: 'SIG', ticker: 'KXVLADTENEVMENTION-25DEC17-SIG' },
+            // First degree
+            'retirement': { contract: 'Retirement', degree: 1 },
+            'blockchain': { contract: 'Blockchain', degree: 1 },
+            'bitcoin': { contract: 'Bitcoin', degree: 1 },
+            'election': { contract: 'Election', degree: 1 },
+            'acquisition': { contract: 'Acquisition', degree: 1 },
+            'acquired': { contract: 'Acquisition', degree: 1 },
+            'kalshi': { contract: 'Kalshi', degree: 1 },
+            'economy': { contract: 'Economy', degree: 1 },
+            'economic': { contract: 'Economy', degree: 1 },
+            'tokenization': { contract: 'Tokenization', degree: 1 },
+            'tokenized': { contract: 'Tokenization', degree: 1 },
+            'sport': { contract: 'Sport', degree: 1 },
+            'sports': { contract: 'Sport', degree: 1 },
+            'innovation': { contract: 'Innovation', degree: 1 },
+            'innovate': { contract: 'Innovation', degree: 1 },
+            'gold': { contract: 'Gold', degree: 1 },
+            'susquehanna': { contract: 'SIG', degree: 1 },
+            'sig': { contract: 'SIG', degree: 1 },
             
-            // Second-derivative triggers
-            'crypto': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
-            'cryptocurrency': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
-            'solana': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
-            'ethereum': { contract: 'Bitcoin', ticker: 'KXVLADTENEVMENTION-25DEC17-BITC' },
-            'bitstamp': { contract: 'Acquisition', ticker: 'KXVLADTENEVMENTION-25DEC17-ACQU' },
-            'prediction market': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
-            'prediction markets': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
-            'betting': { contract: 'Kalshi', ticker: 'KXVLADTENEVMENTION-25DEC17-KALS' },
+            // Second degree
+            'crypto': { contract: 'Bitcoin', degree: 2 },
+            'cryptocurrency': { contract: 'Bitcoin', degree: 2 },
+            'solana': { contract: 'Bitcoin', degree: 2 },
+            'ethereum': { contract: 'Bitcoin', degree: 2 },
+            'btc': { contract: 'Bitcoin', degree: 2 },
+            'coinbase': { contract: 'Bitcoin', degree: 2 },
+            'satoshi': { contract: 'Bitcoin', degree: 2 },
+            'bitstamp': { contract: 'Acquisition', degree: 2 },
+            'x1': { contract: 'Acquisition', degree: 2 },
+            'x1 card': { contract: 'Acquisition', degree: 2 },
+            'merger': { contract: 'Acquisition', degree: 2 },
+            'deal': { contract: 'Acquisition', degree: 2 },
+            'buyout': { contract: 'Acquisition', degree: 2 },
+            'prediction market': { contract: 'Kalshi', degree: 2 },
+            'prediction markets': { contract: 'Kalshi', degree: 2 },
+            'polymarket': { contract: 'Kalshi', degree: 2 },
+            'betting': { contract: 'Kalshi', degree: 2 },
+            'robinhood gold': { contract: 'Gold', degree: 2 },
+            'premium': { contract: 'Gold', degree: 2 },
+            'subscription': { contract: 'Gold', degree: 2 },
+            'legend': { contract: 'Innovation', degree: 2 },
+            'cortex': { contract: 'Innovation', degree: 2 },
+            'ai': { contract: 'Innovation', degree: 2 },
+            'artificial intelligence': { contract: 'Innovation', degree: 2 },
+            'staking': { contract: 'Tokenization', degree: 2 },
+            'rwa': { contract: 'Tokenization', degree: 2 },
+            'smart contract': { contract: 'Blockchain', degree: 2 },
+            'layer 1': { contract: 'Blockchain', degree: 2 },
+            'layer 2': { contract: 'Blockchain', degree: 2 },
+            'roth ira': { contract: 'Retirement', degree: 2 },
+            '401k': { contract: 'Retirement', degree: 2 },
+            'ira': { contract: 'Retirement', degree: 2 },
+            'gdp': { contract: 'Economy', degree: 2 },
+            'inflation': { contract: 'Economy', degree: 2 },
+            'fed': { contract: 'Economy', degree: 2 },
+            'nfl': { contract: 'Sport', degree: 2 },
+            'nba': { contract: 'Sport', degree: 2 },
+            'super bowl': { contract: 'Sport', degree: 2 },
+            'presidential': { contract: 'Election', degree: 2 },
+            'vote': { contract: 'Election', degree: 2 },
         };
         
         const NEGATION_WORDS = ['not', "don't", "won't", 'never', 'no', "isn't", "aren't", "wasn't", "weren't", "haven't", "hasn't", "can't", "couldn't", "shouldn't", "wouldn't", 'without'];
         
-        // DOM elements
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const statusDot = document.getElementById('statusDot');
-        const statusText = document.getElementById('statusText');
-        const transcriptBox = document.getElementById('transcript-box');
-        const triggerAlert = document.getElementById('triggerAlert');
-        const triggerDetails = document.getElementById('triggerDetails');
-        const modeBadge = document.getElementById('modeBadge');
-        const tradesList = document.getElementById('trades-list');
+        // Tab switching
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+            
+            if (tabName === 'mindmap') {
+                renderMindMap();
+            } else if (tabName === 'markets') {
+                renderMarkets();
+            }
+        }
         
-        // Update mode badge when changed
+        // Render mind map
+        function renderMindMap() {
+            const container = document.getElementById('mindmap-container');
+            
+            // Group triggers by contract
+            const grouped = {};
+            for (const [trigger, data] of Object.entries(TRIGGER_MAP)) {
+                if (!grouped[data.contract]) {
+                    grouped[data.contract] = { first: [], second: [] };
+                }
+                if (data.degree === 1) {
+                    grouped[data.contract].first.push(trigger);
+                } else {
+                    grouped[data.contract].second.push(trigger);
+                }
+            }
+            
+            // Sort by ask price
+            const sorted = Object.entries(grouped).sort((a, b) => {
+                return (MARKETS[a[0]]?.ask || 100) - (MARKETS[b[0]]?.ask || 100);
+            });
+            
+            container.innerHTML = sorted.map(([contract, triggers]) => {
+                const market = MARKETS[contract];
+                if (!market) return '';
+                
+                const upside = 100 - market.ask;
+                const isTriggered = triggeredContracts.has(market.ticker);
+                const priceClass = market.ask < 50 ? 'good' : market.ask > 80 ? 'expensive' : '';
+                
+                return `
+                    <div class="mindmap-node ${isTriggered ? 'triggered' : ''}" id="node-${contract.replace(/\s+/g, '-')}">
+                        <div class="node-header">
+                            <div class="node-title">${isTriggered ? '✅ ' : ''}${contract}</div>
+                            <div class="node-price ${priceClass}">${market.ask}¢</div>
+                        </div>
+                        
+                        ${triggers.first.length ? `
+                        <div class="derivative-section">
+                            <div class="derivative-label">1st Degree (Direct)</div>
+                            <div class="derivative-tags">
+                                ${triggers.first.map(t => `
+                                    <div class="derivative-tag first-degree" data-trigger="${t}">${t}</div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        ${triggers.second.length ? `
+                        <div class="derivative-section">
+                            <div class="derivative-label">2nd Degree (What Vlad Says)</div>
+                            <div class="derivative-tags">
+                                ${triggers.second.slice(0, 12).map(t => `
+                                    <div class="derivative-tag second-degree" data-trigger="${t}">${t}</div>
+                                `).join('')}
+                                ${triggers.second.length > 12 ? `<div class="derivative-tag">+${triggers.second.length - 12} more</div>` : ''}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="upside-bar">
+                            <div class="upside-fill" style="width: ${upside}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Render markets
+        function renderMarkets() {
+            const container = document.getElementById('markets-list');
+            const sorted = Object.entries(MARKETS).sort((a, b) => a[1].ask - b[1].ask);
+            
+            container.innerHTML = sorted.map(([word, data]) => {
+                const upside = 100 - data.ask;
+                const isTriggered = triggeredContracts.has(data.ticker);
+                const icon = isTriggered ? '✅' : data.ask < 50 ? '🟢' : data.ask > 80 ? '🔴' : '🟡';
+                
+                return `
+                    <div class="market-item">
+                        <span class="market-word">${icon} ${word}</span>
+                        <span class="market-price ${data.ask > 80 ? 'expensive' : ''}">${data.ask}¢ (+${upside}¢)</span>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Update mode badge
         document.getElementById('tradingMode').addEventListener('change', function() {
+            const badge = document.getElementById('modeBadge');
             if (this.value === 'live') {
-                modeBadge.textContent = '🔴 LIVE TRADING';
-                modeBadge.className = 'mode-badge live';
+                badge.textContent = '🔴 LIVE TRADING';
+                badge.className = 'mode-badge live';
             } else {
-                modeBadge.textContent = '🟡 DRY RUN';
-                modeBadge.className = 'mode-badge dry-run';
+                badge.textContent = '🟡 DRY RUN';
+                badge.className = 'mode-badge dry-run';
             }
         });
         
         function updateStatus(text, state) {
-            statusText.textContent = text;
-            statusDot.className = 'status-dot ' + state;
+            document.getElementById('statusText').textContent = text;
+            document.getElementById('statusDot').className = 'status-dot ' + state;
         }
         
         function updateStats() {
@@ -348,17 +635,20 @@
             triggersCount++;
             updateStats();
             
-            triggerDetails.textContent = ` "${triggerWord}" → ${contract}`;
-            triggerAlert.style.display = 'block';
+            // Show alert
+            const alert = document.getElementById('triggerAlert');
+            const details = document.getElementById('triggerDetails');
+            details.textContent = ` "${triggerWord}" → ${contract}`;
+            alert.style.display = 'block';
+            setTimeout(() => { alert.style.display = 'none'; }, 4000);
             
-            // Flash effect
-            triggerAlert.style.animation = 'none';
-            triggerAlert.offsetHeight; // Trigger reflow
-            triggerAlert.style.animation = 'triggerPulse 0.3s ease-out';
+            // Highlight in mind map
+            const tag = document.querySelector(`.derivative-tag[data-trigger="${triggerWord}"]`);
+            if (tag) {
+                tag.classList.add('matched');
+                setTimeout(() => tag.classList.remove('matched'), 1000);
+            }
             
-            setTimeout(() => { triggerAlert.style.display = 'none'; }, 4000);
-            
-            // Execute trade
             executeTrade(triggerWord, contract, ticker);
         }
         
@@ -366,7 +656,6 @@
             const isDryRun = document.getElementById('tradingMode').value === 'dry';
             const quantity = parseInt(document.getElementById('quantity').value);
             
-            // Record trade
             tradesCount++;
             updateStats();
             
@@ -377,15 +666,17 @@
                 </div>
             `;
             
-            if (tradesList.querySelector('p')) {
-                tradesList.innerHTML = '';
-            }
-            tradesList.insertAdjacentHTML('afterbegin', tradeHtml);
+            const list = document.getElementById('trades-list');
+            if (list.querySelector('p')) list.innerHTML = '';
+            list.insertAdjacentHTML('afterbegin', tradeHtml);
             
-            // Mark contract as triggered
             triggeredContracts.add(ticker);
             
-            console.log(`🎯 TRADE: ${triggerWord} → ${contract} (${ticker}) | Mode: ${isDryRun ? 'DRY' : 'LIVE'}`);
+            // Update mind map node
+            const node = document.querySelector(`#node-${contract.replace(/\s+/g, '-')}`);
+            if (node) node.classList.add('triggered');
+            
+            console.log(`🎯 TRADE: ${triggerWord} → ${contract} (${ticker})`);
         }
         
         function checkForTriggers(text) {
@@ -395,12 +686,10 @@
             updateStats();
             
             for (const [trigger, data] of Object.entries(TRIGGER_MAP)) {
-                // Skip if already triggered this contract
-                if (triggeredContracts.has(data.ticker)) continue;
+                const ticker = MARKETS[data.contract]?.ticker;
+                if (!ticker || triggeredContracts.has(ticker)) continue;
                 
-                // Check if trigger exists in text
                 if (lower.includes(trigger)) {
-                    // Find trigger position
                     const triggerWords = trigger.split(' ');
                     let triggerIndex = -1;
                     
@@ -420,18 +709,16 @@
                     
                     if (triggerIndex === -1) continue;
                     
-                    // Check for negation in preceding 4 words
                     let isNegated = false;
                     for (let i = Math.max(0, triggerIndex - 4); i < triggerIndex; i++) {
                         if (NEGATION_WORDS.some(neg => words[i].includes(neg))) {
                             isNegated = true;
-                            console.log(`⚠️ Negation detected for "${trigger}"`);
                             break;
                         }
                     }
                     
                     if (!isNegated) {
-                        showTrigger(trigger, data.contract, data.ticker);
+                        showTrigger(trigger, data.contract, ticker);
                     }
                 }
             }
@@ -448,17 +735,11 @@
                 updateStatus('Requesting microphone access...', '');
                 
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        channelCount: 1,
-                        sampleRate: 16000,
-                        echoCancellation: true,
-                        noiseSuppression: true
-                    }
+                    audio: { channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true }
                 });
                 
                 updateStatus('Connecting to Deepgram...', '');
                 
-                // Connect to Deepgram
                 socket = new WebSocket(
                     'wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&smart_format=true&punctuate=true&interim_results=true',
                     ['token', apiKey]
@@ -466,56 +747,42 @@
                 
                 socket.onopen = () => {
                     updateStatus('🔴 LIVE - Listening for triggers...', 'live');
-                    startBtn.disabled = true;
-                    stopBtn.disabled = false;
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
                     isListening = true;
                     
-                    // Clear transcript
-                    transcriptBox.innerHTML = '';
+                    document.getElementById('transcript-box').innerHTML = '';
                     
-                    // Start recording
                     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-                    
                     mediaRecorder.ondataavailable = (event) => {
                         if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
                             socket.send(event.data);
                         }
                     };
-                    
-                    mediaRecorder.start(250); // 250ms chunks for low latency
+                    mediaRecorder.start(250);
                 };
                 
                 socket.onmessage = (event) => {
                     const data = JSON.parse(event.data);
-                    
                     if (data.channel?.alternatives?.[0]) {
                         const transcript = data.channel.alternatives[0].transcript;
                         if (transcript) {
                             const isFinal = data.is_final;
-                            
-                            // Add to transcript box
-                            const lineClass = isFinal ? 'final' : 'interim';
-                            const lineHtml = `<div class="transcript-line ${lineClass}">${transcript}</div>`;
+                            const box = document.getElementById('transcript-box');
                             
                             if (isFinal) {
-                                // Remove interim and add final
-                                const interims = transcriptBox.querySelectorAll('.interim');
-                                interims.forEach(el => el.remove());
-                                transcriptBox.insertAdjacentHTML('beforeend', lineHtml);
-                                
-                                // Check for triggers!
+                                box.querySelectorAll('.interim').forEach(el => el.remove());
+                                box.insertAdjacentHTML('beforeend', `<div class="transcript-line final">${transcript}</div>`);
                                 checkForTriggers(transcript);
                             } else {
-                                // Update interim
-                                const existing = transcriptBox.querySelector('.interim');
+                                const existing = box.querySelector('.interim');
                                 if (existing) {
                                     existing.textContent = transcript;
                                 } else {
-                                    transcriptBox.insertAdjacentHTML('beforeend', lineHtml);
+                                    box.insertAdjacentHTML('beforeend', `<div class="transcript-line interim">${transcript}</div>`);
                                 }
                             }
-                            
-                            transcriptBox.scrollTop = transcriptBox.scrollHeight;
+                            box.scrollTop = box.scrollHeight;
                         }
                     }
                 };
@@ -540,18 +807,15 @@
         
         function stopListening() {
             isListening = false;
-            
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
                 mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
-            
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.close();
             }
-            
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
             updateStatus('Stopped', 'ready');
         }
         
