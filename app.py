@@ -1,52 +1,19 @@
 """
 🎙️ Keynote Scalper - Live Audio Trading System
 ==============================================
-
-A Streamlit app for real-time speech-to-trade on Kalshi "What will X say?" markets.
-Uses Deepgram for live audio transcription via WebRTC.
 """
 
 import streamlit as st
 import json
 import os
 from datetime import datetime
-import queue
-import threading
-import numpy as np
-
-# WebRTC for audio capture
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
-import av
-
-# Deepgram for transcription
-import websockets
-import asyncio
-import base64
 
 # Page config
 st.set_page_config(
     page_title="Keynote Scalper",
     page_icon="🎙️",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
-
-# Custom CSS
-st.markdown("""
-<style>
-    .trigger-alert {
-        background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
-        padding: 20px;
-        border-radius: 10px;
-        margin: 10px 0;
-        color: white;
-        font-weight: bold;
-    }
-    .stAlert {
-        margin-top: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # Initialize session state
 if 'transcripts' not in st.session_state:
@@ -55,10 +22,11 @@ if 'triggers_detected' not in st.session_state:
     st.session_state.triggers_detected = []
 if 'triggered_contracts' not in st.session_state:
     st.session_state.triggered_contracts = set()
-if 'is_listening' not in st.session_state:
-    st.session_state.is_listening = False
 
-# Trigger map - 1st and 2nd degree
+# Load Deepgram key from secrets (hidden)
+DEEPGRAM_KEY = os.environ.get('DEEPGRAM_API_KEY', '')
+
+# Trigger map
 TRIGGER_MAP = {
     # First degree (direct contract words)
     "retirement": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 1},
@@ -80,17 +48,20 @@ TRIGGER_MAP = {
     "innovate": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 1},
     "gold": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 1},
     
-    # Second degree (what Vlad actually says -> maps to contracts)
+    # Second degree (what Vlad actually says)
     "crypto": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "cryptocurrency": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "btc": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "solana": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "ethereum": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
+    "eth": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "coinbase": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "satoshi": {"contract": "Bitcoin", "ticker": "KXVLADTENEVMENTION-25DEC17-BITC", "degree": 2},
     "bitstamp": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
     "x1": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "x1 card": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
     "drivewealth": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
+    "say technologies": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
     "merger": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
     "deal": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
     "buyout": {"contract": "Acquisition", "ticker": "KXVLADTENEVMENTION-25DEC17-ACQU", "degree": 2},
@@ -98,35 +69,32 @@ TRIGGER_MAP = {
     "prediction markets": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
     "polymarket": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
     "event contracts": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
+    "betting": {"contract": "Kalshi", "ticker": "KXVLADTENEVMENTION-25DEC17-KALS", "degree": 2},
     "robinhood gold": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
-    "gold card": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
+    "premium": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
+    "subscription": {"contract": "Gold", "ticker": "KXVLADTENEVMENTION-25DEC17-GOLD", "degree": 2},
     "legend": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
     "cortex": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
     "ai": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
-    "artificial intelligence": {"contract": "Innovation", "ticker": "KXVLADTENEVMENTION-25DEC17-INNO", "degree": 2},
     "staking": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
-    "tokenize": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
     "rwa": {"contract": "Tokenization", "ticker": "KXVLADTENEVMENTION-25DEC17-TOKE", "degree": 2},
     "roth ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
     "401k": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
     "ira": {"contract": "Retirement", "ticker": "KXVLADTENEVMENTION-25DEC17-RETI", "degree": 2},
     "smart contract": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
     "layer 1": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
-    "on chain": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
+    "layer 2": {"contract": "Blockchain", "ticker": "KXVLADTENEVMENTION-25DEC17-BLOC", "degree": 2},
     "gdp": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
     "inflation": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
-    "federal reserve": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
-    "interest rate": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
+    "fed": {"contract": "Economy", "ticker": "KXVLADTENEVMENTION-25DEC17-ECON", "degree": 2},
     "nfl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
     "nba": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
     "super bowl": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
-    "march madness": {"contract": "Sport", "ticker": "KXVLADTENEVMENTION-25DEC17-SPOR", "degree": 2},
     "presidential": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
     "vote": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
-    "ballot": {"contract": "Election", "ticker": "KXVLADTENEVMENTION-25DEC17-ELEC", "degree": 2},
 }
 
-NEGATION_WORDS = ['not', "don't", "won't", 'never', 'no', "isn't", "aren't", "wasn't", "weren't", "can't", "couldn't", "shouldn't", "wouldn't", 'without']
+NEGATION_WORDS = ['not', "don't", "won't", 'never', 'no', "isn't", "aren't"]
 
 
 def check_for_triggers(text: str) -> list:
@@ -136,12 +104,10 @@ def check_for_triggers(text: str) -> list:
     words = text_lower.split()
     
     for trigger, data in TRIGGER_MAP.items():
-        # Skip if we already triggered this contract
         if data['ticker'] in st.session_state.triggered_contracts:
             continue
             
         if trigger in text_lower:
-            # Find trigger position for negation check
             trigger_words = trigger.split()
             trigger_idx = -1
             
@@ -158,7 +124,7 @@ def check_for_triggers(text: str) -> list:
             if trigger_idx == -1:
                 continue
             
-            # Check for negation in preceding words
+            # Check negation
             is_negated = False
             for i in range(max(0, trigger_idx - 4), trigger_idx):
                 if any(neg in words[i] for neg in NEGATION_WORDS):
@@ -170,113 +136,41 @@ def check_for_triggers(text: str) -> list:
                     'trigger': trigger,
                     'contract': data['contract'],
                     'ticker': data['ticker'],
-                    'degree': data.get('degree', 1),
-                    'timestamp': datetime.now().strftime('%H:%M:%S'),
-                    'context': text[:100]
+                    'degree': data['degree'],
+                    'timestamp': datetime.now().strftime('%H:%M:%S')
                 })
     
     return found_triggers
 
 
 def process_transcript(text: str):
-    """Process transcript text for triggers."""
+    """Process transcript text."""
     if not text.strip():
         return
     
-    # Add to transcripts
     st.session_state.transcripts.append({
         'time': datetime.now().strftime('%H:%M:%S'),
         'text': text
     })
     
-    # Check for triggers
     triggers = check_for_triggers(text)
     for trigger in triggers:
         st.session_state.triggers_detected.append(trigger)
         st.session_state.triggered_contracts.add(trigger['ticker'])
 
 
-# Audio processor for WebRTC
-class DeepgramAudioProcessor(AudioProcessorBase):
-    def __init__(self, deepgram_key: str, transcript_queue: queue.Queue):
-        self.deepgram_key = deepgram_key
-        self.transcript_queue = transcript_queue
-        self.ws = None
-        self.loop = None
-        self.connected = False
-        
-    async def connect_deepgram(self):
-        """Connect to Deepgram WebSocket."""
-        try:
-            url = "wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&smart_format=true&interim_results=true"
-            self.ws = await websockets.connect(
-                url,
-                extra_headers={"Authorization": f"Token {self.deepgram_key}"}
-            )
-            self.connected = True
-            
-            # Start receiving task
-            asyncio.create_task(self.receive_transcripts())
-        except Exception as e:
-            print(f"Deepgram connection error: {e}")
-            self.connected = False
-    
-    async def receive_transcripts(self):
-        """Receive transcripts from Deepgram."""
-        try:
-            async for message in self.ws:
-                data = json.loads(message)
-                if 'channel' in data:
-                    transcript = data['channel']['alternatives'][0].get('transcript', '')
-                    is_final = data.get('is_final', False)
-                    if transcript and is_final:
-                        self.transcript_queue.put(transcript)
-        except Exception as e:
-            print(f"Receive error: {e}")
-    
-    async def send_audio(self, audio_bytes):
-        """Send audio to Deepgram."""
-        if self.ws and self.connected:
-            try:
-                await self.ws.send(audio_bytes)
-            except Exception as e:
-                print(f"Send error: {e}")
-    
-    def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
-        """Process incoming audio frame."""
-        # Convert to bytes
-        audio_data = frame.to_ndarray().tobytes()
-        
-        # Send to Deepgram (in background)
-        if self.loop is None:
-            self.loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self.loop)
-            self.loop.run_until_complete(self.connect_deepgram())
-        
-        if self.connected:
-            self.loop.run_until_complete(self.send_audio(audio_data))
-        
-        return frame
-
-
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Configuration")
     
-    # API Key
-    deepgram_key = st.text_input(
-        "🔑 Deepgram API Key",
-        type="password",
-        value=os.environ.get('DEEPGRAM_API_KEY', ''),
-        help="Required for live audio transcription"
-    )
-    
-    if not deepgram_key:
-        st.warning("⚠️ Enter Deepgram API key to enable live audio")
+    # Check if API key is set from secrets
+    if DEEPGRAM_KEY:
+        st.success("✅ Deepgram API key loaded from secrets")
+    else:
+        st.warning("⚠️ Add DEEPGRAM_API_KEY to secrets")
     
     st.divider()
     
-    # Stats
     st.subheader("📊 Session Stats")
     col1, col2 = st.columns(2)
     with col1:
@@ -286,93 +180,65 @@ with st.sidebar:
     
     st.metric("Transcripts", len(st.session_state.transcripts))
     
-    # Reset
-    if st.button("🗑️ Reset Session", use_container_width=True):
+    if st.button("🗑️ Reset", use_container_width=True):
         st.session_state.transcripts = []
         st.session_state.triggers_detected = []
         st.session_state.triggered_contracts = set()
         st.rerun()
 
-# Main content
+# Main
 st.title("🎙️ Keynote Scalper")
-st.caption("Live speech-to-trade for Kalshi 'What will X say?' markets | Robinhood YES/NO Keynote")
+st.caption("Live speech-to-trade for Kalshi markets | Robinhood YES/NO Keynote")
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["🎤 Live Audio", "🎯 Triggers", "📊 Markets"])
+tab1, tab2, tab3 = st.tabs(["🎤 Live Input", "🎯 Triggers", "📊 Markets"])
 
 with tab1:
-    st.header("Live Audio Transcription")
+    st.header("Live Transcript Input")
     
-    if deepgram_key:
-        st.success("✅ Deepgram connected - Click START to begin listening")
-        
-        # Create transcript queue
-        if 'transcript_queue' not in st.session_state:
-            st.session_state.transcript_queue = queue.Queue()
-        
-        # WebRTC streamer for audio capture
-        webrtc_ctx = webrtc_streamer(
-            key="keynote-audio",
-            mode=WebRtcMode.SENDONLY,
-            audio_receiver_size=1024,
-            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
-            media_stream_constraints={"audio": True, "video": False},
-        )
-        
-        if webrtc_ctx.state.playing:
-            st.info("🔴 **LIVE** - Listening for triggers...")
-            
-            # Note about audio processing
-            st.caption("""
-            **How it works:**
-            1. Your browser captures audio from your microphone
-            2. Audio is sent to Deepgram for real-time transcription
-            3. Transcripts are checked for trigger words
-            4. Triggers are logged for trading
-            
-            **Tip:** Play the keynote through your speakers - your mic will pick it up!
-            """)
-    else:
-        st.warning("⚠️ Enter your Deepgram API key in the sidebar to enable live audio")
+    # Info about live audio (for now it's manual)
+    if not DEEPGRAM_KEY:
+        st.warning("⚠️ Add DEEPGRAM_API_KEY to app secrets for automatic transcription")
     
-    st.divider()
-    
-    # Manual input fallback
-    st.subheader("📝 Manual Input (Fallback)")
+    # Manual input
+    st.subheader("📝 Enter What You Hear")
     col1, col2 = st.columns([5, 1])
     with col1:
-        manual_text = st.text_input("Type what you hear:", placeholder="Enter transcript text...")
+        manual_text = st.text_input(
+            "Transcript",
+            placeholder="Type what Vlad says...",
+            label_visibility="collapsed"
+        )
     with col2:
-        if st.button("Process", type="primary"):
+        if st.button("Process", type="primary", use_container_width=True):
             if manual_text:
                 process_transcript(manual_text)
                 st.rerun()
     
+    st.caption("💡 **Quick test:** Type 'bitcoin' and click Process to see a trigger!")
+    
     st.divider()
     
-    # Live transcript display
-    st.subheader("📜 Live Transcript")
-    transcript_container = st.container()
-    with transcript_container:
-        if st.session_state.transcripts:
-            for t in st.session_state.transcripts[-15:]:
-                st.text(f"[{t['time']}] {t['text']}")
-        else:
-            st.caption("Transcripts will appear here...")
+    # Live transcript
+    st.subheader("📜 Transcript Log")
+    if st.session_state.transcripts:
+        for t in st.session_state.transcripts[-15:]:
+            st.text(f"[{t['time']}] {t['text']}")
+    else:
+        st.caption("Your transcripts will appear here...")
     
     # Trigger alerts
     if st.session_state.triggers_detected:
         st.divider()
         st.subheader("🚨 TRIGGER ALERTS")
         for trigger in reversed(st.session_state.triggers_detected[-5:]):
-            degree_label = "1st°" if trigger['degree'] == 1 else "2nd°"
-            st.error(f"🎯 **{trigger['trigger'].upper()}** → {trigger['contract']} ({degree_label}) @ {trigger['timestamp']}")
+            degree = "1st°" if trigger['degree'] == 1 else "2nd°"
+            st.error(f"🎯 **{trigger['trigger'].upper()}** → {trigger['contract']} ({degree}) @ {trigger['timestamp']}")
 
 with tab2:
     st.header("🎯 Trigger Map")
-    st.caption("1st Degree = Contract words | 2nd Degree = What Vlad actually says")
+    st.caption("1st Degree = Contract words | 2nd Degree = What Vlad says")
     
-    # Group triggers by contract
     contracts = {}
     for trigger, data in TRIGGER_MAP.items():
         contract = data['contract']
@@ -383,7 +249,6 @@ with tab2:
         else:
             contracts[contract]['second'].append(trigger)
     
-    # Display
     for contract in sorted(contracts.keys()):
         triggers = contracts[contract]
         triggered = contract in [t['contract'] for t in st.session_state.triggers_detected]
@@ -393,29 +258,31 @@ with tab2:
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**1st Degree (Direct)**")
-                st.code(", ".join(triggers['first']))
+                for t in triggers['first']:
+                    st.code(t)
             with col2:
-                st.markdown("**2nd Degree (Vlad Says)**")
-                st.code(", ".join(triggers['second'][:10]))
-                if len(triggers['second']) > 10:
-                    st.caption(f"+{len(triggers['second'])-10} more")
+                st.markdown("**2nd Degree (Product Names)**")
+                for t in triggers['second'][:8]:
+                    st.code(t)
+                if len(triggers['second']) > 8:
+                    st.caption(f"+{len(triggers['second'])-8} more")
 
 with tab3:
     st.header("📊 Market Status")
     
     markets = [
-        {"word": "Retirement", "ask": 17, "ticker": "RETI"},
-        {"word": "Blockchain", "ask": 22, "ticker": "BLOC"},
-        {"word": "Bitcoin", "ask": 24, "ticker": "BITC"},
-        {"word": "Election", "ask": 34, "ticker": "ELEC"},
-        {"word": "Acquisition", "ask": 39, "ticker": "ACQU"},
-        {"word": "Economy", "ask": 40, "ticker": "ECON"},
-        {"word": "Kalshi", "ask": 41, "ticker": "KALS"},
-        {"word": "SIG", "ask": 56, "ticker": "SIG"},
-        {"word": "Tokenization", "ask": 66, "ticker": "TOKE"},
-        {"word": "Sport", "ask": 73, "ticker": "SPOR"},
-        {"word": "Innovation", "ask": 78, "ticker": "INNO"},
-        {"word": "Gold", "ask": 84, "ticker": "GOLD"},
+        {"word": "Retirement", "ask": 17},
+        {"word": "Blockchain", "ask": 22},
+        {"word": "Bitcoin", "ask": 24},
+        {"word": "Election", "ask": 34},
+        {"word": "Acquisition", "ask": 39},
+        {"word": "Economy", "ask": 40},
+        {"word": "Kalshi", "ask": 41},
+        {"word": "SIG", "ask": 56},
+        {"word": "Tokenization", "ask": 66},
+        {"word": "Sport", "ask": 73},
+        {"word": "Innovation", "ask": 78},
+        {"word": "Gold", "ask": 84},
     ]
     
     for m in markets:
@@ -438,4 +305,4 @@ with tab3:
 
 # Footer
 st.divider()
-st.caption(f"Triggers loaded: {len(TRIGGER_MAP)} | Contracts: 12 | Event: Robinhood YES/NO Dec 16, 2024")
+st.caption(f"Triggers: {len(TRIGGER_MAP)} | Contracts: 12 | Event: Robinhood YES/NO @ 9pm ET")
