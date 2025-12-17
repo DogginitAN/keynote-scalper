@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Live Keynote Scalper (Fixed)</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+        }
+        .container { max-width: 1600px; margin: 0 auto; }
+        h1 { color: #4CAF50; margin-bottom: 5px; }
+        
+        .card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .card h2 { margin-top: 0; color: #4CAF50; font-size: 18px; }
+        
+        .config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .config-item label { display: block; color: #888; font-size: 12px; margin-bottom: 5px; }
+        .config-item input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 6px;
+            background: #16213e;
+            color: #fff;
+            font-size: 14px;
+        }
+        
+        .btn-group { display: flex; gap: 10px; margin: 20px 0; }
+        .btn {
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        .btn-start { background: #4CAF50; color: white; }
+        .btn-start:disabled { background: #333; cursor: not-allowed; }
+        .btn-stop { background: #f44336; color: white; }
+        .btn-stop:disabled { background: #333; cursor: not-allowed; }
+        
+        .status-bar {
+            padding: 12px 15px;
+            background: #16213e;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        
+        #transcript-box {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', monospace;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .transcript-line {
+            margin: 8px 0;
+            padding: 4px 0;
+        }
+        .transcript-final { color: #00ff00; }
+        .transcript-interim { color: #666; font-style: italic; }
+        
+        .trigger-alert {
+            padding: 15px;
+            background: linear-gradient(135deg, #ff6b6b, #ee5a5a);
+            border-radius: 8px;
+            margin: 15px 0;
+            display: none;
+        }
+        
+        .stat-box {
+            background: #16213e;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .stat-value { font-size: 28px; font-weight: bold; color: #4CAF50; }
+        .stat-label { font-size: 12px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Live Keynote Scalper</h1>
+        <p style="color: #888;">Real-time Deepgram transcription</p>
+        
+        <div class="card">
+            <h2>⚙️ Configuration</h2>
+            <div class="config-grid">
+                <div class="config-item">
+                    <label>Deepgram API Key</label>
+                    <input type="password" id="apiKey" placeholder="Enter your key">
+                </div>
+                <div class="config-item">
+                    <label>Quantity</label>
+                    <input type="number" id="quantity" value="10" min="1" max="100">
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>🎤 Audio Capture</h2>
+            <div class="btn-group">
+                <button class="btn btn-start" id="startBtn" onclick="startListening()">
+                    🎙️ START LISTENING
+                </button>
+                <button class="btn btn-stop" id="stopBtn" onclick="stopListening()" disabled>
+                    ⏹️ STOP
+                </button>
+            </div>
+            
+            <div class="status-bar">
+                <div id="statusText">Ready - Enter API key and click Start</div>
+            </div>
+            
+            <div class="trigger-alert" id="triggerAlert">
+                <strong>🎯 TRIGGER:</strong> <span id="triggerDetails"></span>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📜 Live Transcript</h2>
+            <div id="transcript-box">
+                <div style="color: #666;">Waiting for audio...</div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>📊 Stats</h2>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                <div class="stat-box">
+                    <div class="stat-value" id="triggersCount">0</div>
+                    <div class="stat-label">Triggers</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="wordsCount">0</div>
+                    <div class="stat-label">Words</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-value" id="linesCount">0</div>
+                    <div class="stat-label">Lines</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let socket;
+        let mediaRecorder;
+        let isListening = false;
+        let triggersCount = 0;
+        let wordsCount = 0;
+        let linesCount = 0;
+        let triggeredContracts = new Set();
+        
+        const TRIGGERS = {
+            'bitcoin': 'Bitcoin', 'btc': 'Bitcoin', 'crypto': 'Bitcoin', 'solana': 'Bitcoin',
+            'acquisition': 'Acquisition', 'bitstamp': 'Acquisition', 'merger': 'Acquisition',
+            'kalshi': 'Kalshi', 'prediction market': 'Kalshi',
+            'retirement': 'Retirement', 'ira': 'Retirement',
+            'blockchain': 'Blockchain', 'innovation': 'Innovation'
+        };
+        
+        function updateStats() {
+            document.getElementById('triggersCount').textContent = triggersCount;
+            document.getElementById('wordsCount').textContent = wordsCount;
+            document.getElementById('linesCount').textContent = linesCount;
+        }
+        
+        function addTranscript(text, isFinal) {
+            const box = document.getElementById('transcript-box');
+            const className = isFinal ? 'transcript-final' : 'transcript-interim';
+            
+            if (isFinal) {
+                // Remove any interim lines
+                const interims = box.querySelectorAll('.transcript-interim');
+                interims.forEach(el => el.remove());
+                
+                // Add final line
+                const line = document.createElement('div');
+                line.className = `transcript-line ${className}`;
+                line.textContent = text;
+                box.appendChild(line);
+                
+                // Update stats
+                linesCount++;
+                wordsCount += text.split(' ').length;
+                updateStats();
+                
+                // Check for triggers
+                checkTriggers(text);
+            } else {
+                // Update or create interim line
+                let interim = box.querySelector('.transcript-interim');
+                if (interim) {
+                    interim.textContent = text;
+                } else {
+                    const line = document.createElement('div');
+                    line.className = `transcript-line ${className}`;
+                    line.textContent = text;
+                    box.appendChild(line);
+                }
+            }
+            
+            // Auto-scroll
+            box.scrollTop = box.scrollHeight;
+        }
+        
+        function checkTriggers(text) {
+            const lower = text.toLowerCase();
+            
+            for (const [trigger, contract] of Object.entries(TRIGGERS)) {
+                if (lower.includes(trigger) && !triggeredContracts.has(contract)) {
+                    triggersCount++;
+                    updateStats();
+                    triggeredContracts.add(contract);
+                    
+                    // Show alert
+                    const alert = document.getElementById('triggerAlert');
+                    const details = document.getElementById('triggerDetails');
+                    details.textContent = `"${trigger}" → ${contract}`;
+                    alert.style.display = 'block';
+                    
+                    console.log(`🎯 TRIGGER: ${trigger} → ${contract}`);
+                    
+                    setTimeout(() => alert.style.display = 'none', 5000);
+                }
+            }
+        }
+        
+        async function startListening() {
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (!apiKey) {
+                alert('Please enter your Deepgram API key');
+                return;
+            }
+            
+            try {
+                document.getElementById('statusText').textContent = 'Requesting microphone...';
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        channelCount: 1,
+                        sampleRate: 16000,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    }
+                });
+                
+                document.getElementById('statusText').textContent = 'Connecting to Deepgram...';
+                console.log('✅ Microphone access granted');
+                
+                socket = new WebSocket(
+                    'wss://api.deepgram.com/v1/listen?model=nova-2&language=en-US&smart_format=true&punctuate=true&interim_results=true',
+                    ['token', apiKey]
+                );
+                
+                socket.onopen = () => {
+                    document.getElementById('statusText').textContent = '🔴 LIVE - Listening...';
+                    document.getElementById('startBtn').disabled = true;
+                    document.getElementById('stopBtn').disabled = false;
+                    isListening = true;
+                    
+                    console.log('✅ Deepgram connected');
+                    
+                    // Clear transcript
+                    document.getElementById('transcript-box').innerHTML = '';
+                    
+                    // Start recording
+                    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && socket.readyState === 1) {
+                            socket.send(event.data);
+                        }
+                    };
+                    
+                    mediaRecorder.start(250);
+                    console.log('✅ Recording started');
+                };
+                
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        console.log('📩 Deepgram response:', data);
+                        
+                        if (data.channel && data.channel.alternatives && data.channel.alternatives[0]) {
+                            const transcript = data.channel.alternatives[0].transcript;
+                            
+                            if (transcript && transcript.length > 0) {
+                                const isFinal = data.is_final || false;
+                                console.log(`📝 Transcript (${isFinal ? 'FINAL' : 'interim'}): ${transcript}`);
+                                
+                                addTranscript(transcript, isFinal);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('❌ Parse error:', e);
+                    }
+                };
+                
+                socket.onerror = (error) => {
+                    console.error('❌ WebSocket error:', error);
+                    document.getElementById('statusText').textContent = 'Connection error';
+                };
+                
+                socket.onclose = () => {
+                    console.log('WebSocket closed');
+                    if (isListening) {
+                        stopListening();
+                    }
+                };
+                
+            } catch (error) {
+                console.error('❌ Error:', error);
+                document.getElementById('statusText').textContent = 'Error: ' + error.message;
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        function stopListening() {
+            isListening = false;
+            
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            
+            if (socket && socket.readyState === 1) {
+                socket.close();
+            }
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('statusText').textContent = 'Stopped';
+        }
+        
+        console.log('✅ Script loaded');
+    </script>
+</body>
+</html>
